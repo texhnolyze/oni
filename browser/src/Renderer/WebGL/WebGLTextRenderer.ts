@@ -1,5 +1,6 @@
 import { ICell } from "../../neovim"
 import { IColorNormalizer } from "./IColorNormalizer"
+import { ILigatureGroupLocation, LigatureGroupLocator } from "./LigatureGroupLocator"
 import { IWebGLAtlasOptions, WebGLAtlas, WebGLGlyph } from "./WebGLAtlas"
 import {
     createProgram,
@@ -96,6 +97,7 @@ export class WebGlTextRenderer {
     private _glyphOverlapInPixels: number
     private _subpixelDivisor: number
     private _devicePixelRatio: number
+    private _ligatureGroupLocator = new LigatureGroupLocator()
 
     private _firstPassProgram: WebGLProgram
     private _firstPassViewportScaleLocation: WebGLUniformLocation
@@ -162,6 +164,11 @@ export class WebGlTextRenderer {
         viewportScaleX: number,
         viewportScaleY: number,
     ) {
+        const ligatureGroupLocations = this._ligatureGroupLocator.getLigatureGroupLocations(
+            columnCount,
+            rowCount,
+            getCell,
+        )
         const glyphInstanceCount = this.populateGlyphInstances(
             columnCount,
             rowCount,
@@ -169,6 +176,7 @@ export class WebGlTextRenderer {
             fontWidthInPixels,
             fontHeightInPixels,
             defaultForegroundColor,
+            ligatureGroupLocations,
         )
         this.drawGlyphInstances(glyphInstanceCount, viewportScaleX, viewportScaleY)
     }
@@ -273,25 +281,47 @@ export class WebGlTextRenderer {
         fontWidthInPixels: number,
         fontHeightInPixels: number,
         defaultForegroundColor: string,
+        ligatureGroupLocations: ILigatureGroupLocation[],
     ) {
         const pixelRatioAdaptedFontWidth = fontWidthInPixels * this._devicePixelRatio
         const pixelRatioAdaptedFontHeight = fontHeightInPixels * this._devicePixelRatio
         const pixelRatioAdaptedGlyphOverlap = this._glyphOverlapInPixels * this._devicePixelRatio
 
         let glyphCount = 0
-        let y = 0
 
         // TODO refactor this to not be as reliant on mutations
         for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-            let x = 0
-
-            for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+            let columnIndex = 0
+            while (columnIndex < columnCount) {
                 const cell = getCell(columnIndex, rowIndex)
-                const char = cell.character
-                if (!isWhiteSpace(char)) {
+
+                let groupedCharacters = cell.character
+                const ligatureGroup = ligatureGroupLocations.find(
+                    ligatureGroupLocation =>
+                        ligatureGroupLocation.startingCellColumnIndex === columnIndex &&
+                        ligatureGroupLocation.startingCellRowIndex === rowIndex,
+                )
+                if (ligatureGroup) {
+                    for (
+                        let ligatureCellIndex = 1;
+                        ligatureCellIndex < ligatureGroup.length;
+                        ligatureCellIndex++
+                    ) {
+                        const ligatureCell = getCell(columnIndex + ligatureCellIndex, rowIndex)
+                        groupedCharacters += ligatureCell.character
+                    }
+                }
+                if (!isWhiteSpace(groupedCharacters)) {
+                    const x = columnIndex * pixelRatioAdaptedFontWidth
+                    const y = rowIndex * pixelRatioAdaptedFontHeight
                     const variantIndex =
                         Math.round(x * this._subpixelDivisor) % this._subpixelDivisor
-                    const glyph = this._atlas.getGlyph(char, cell.bold, cell.italic, variantIndex)
+                    const glyph = this._atlas.getGlyph(
+                        groupedCharacters,
+                        cell.bold,
+                        cell.italic,
+                        variantIndex,
+                    )
                     const colorToUse = cell.foregroundColor || defaultForegroundColor || "white"
                     const normalizedTextColor = this._colorNormalizer.normalizeColor(colorToUse)
 
@@ -305,10 +335,8 @@ export class WebGlTextRenderer {
 
                     glyphCount++
                 }
-                x += pixelRatioAdaptedFontWidth
+                columnIndex += Math.min(groupedCharacters.length, 1)
             }
-
-            y += pixelRatioAdaptedFontHeight
         }
         this._atlas.uploadTexture()
 
