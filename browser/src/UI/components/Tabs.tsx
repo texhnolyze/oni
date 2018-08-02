@@ -315,6 +315,7 @@ const getTabsFromBuffers = createSelector(
     ) => {
         const bufferCount = allBuffers.length
         const names = allBuffers.map((b: any) => b.file)
+
         const tabs = allBuffers.map((buf: any, idx: number, buffers: any): ITabProps => {
             const isDuplicate = checkDuplicate(buf.file, names)
             const isActive =
@@ -348,15 +349,23 @@ const getTabsFromVimTabs = createSelector(
         showFileIcon: boolean,
         allBuffers: State.IBuffer[],
     ) => {
-        return tabState.tabs.map((t: State.ITab, idx: number) => ({
-            id: idx + 1,
-            name: getIdPrefix((idx + 1).toString(), shouldShowId) + getTabName(t.name),
-            highlightColor: t.id === tabState.selectedTabId ? color : "transparent",
-            iconFileName: showFileIcon ? getTabName(t.name) : "",
-            isSelected: t.id === tabState.selectedTabId,
-            isDirty: checkTabBuffers(t.buffersInTab, allBuffers),
-            description: t.name,
-        }))
+        const names = tabState.tabs.map((t: State.ITab) => t.name)
+
+        return tabState.tabs.map((t: State.ITab, idx: number) => {
+            const isDuplicate = checkDuplicate(t.name, names)
+
+            return {
+                id: idx + 1,
+                name:
+                    getIdPrefix((idx + 1).toString(), shouldShowId) +
+                    getTabName(t.name, isDuplicate),
+                highlightColor: t.id === tabState.selectedTabId ? color : "transparent",
+                iconFileName: showFileIcon ? getTabName(t.name) : "",
+                isSelected: t.id === tabState.selectedTabId,
+                isDirty: checkTabBuffers(t.buffersInTab, allBuffers),
+                description: t.name,
+            }
+        })
     },
 )
 
